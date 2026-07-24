@@ -249,4 +249,4 @@ private-llm/
 
 ## License
 
-Proprietary — Solomon's AI Infra Agency. All rights reserved.
+MIT License. See [`LICENSE`](./LICENSE).

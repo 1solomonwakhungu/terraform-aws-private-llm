@@ -65,7 +65,7 @@ locals {
   has_domain = var.domain_name != ""
 
   # The zone ID — either explicitly provided or looked up.
-  zone_id = coalesce(var.route53_zone_id, try(data.aws_route53_zone.primary[0].zone_id, ""))
+  zone_id = var.route53_zone_id != "" ? var.route53_zone_id : try(data.aws_route53_zone.primary[0].zone_id, "")
 
   # Access URL depends on whether we have TLS.
   access_url = local.has_domain ? "https://${var.domain_name}" : "http://${aws_eip.this.public_ip}"
