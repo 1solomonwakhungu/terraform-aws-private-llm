@@ -1,5 +1,8 @@
 # Private LLM Stack — Terraform Module
 
+[![Terraform CI](https://github.com/1solomonwakhungu/terraform-aws-private-llm/actions/workflows/terraform.yml/badge.svg?branch=main)](https://github.com/1solomonwakhungu/terraform-aws-private-llm/actions/workflows/terraform.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A production-grade Terraform module that deploys a complete **private LLM infrastructure** on AWS in under 20 minutes.
 
 ## What This Module Deploys
