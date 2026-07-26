@@ -9,9 +9,9 @@ variable "aws_region" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type. Use g5.xlarge for GPU acceleration or t3.medium for CPU-only."
+  description = "EC2 instance type. GPU families require an explicit GPU-ready ami_id."
   type        = string
-  default     = "g5.xlarge"
+  default     = "t3.medium"
 
   validation {
     condition     = can(regex("^(t3\\.|g4dn\\.|g5\\.|p3\\.|p4d\\.)", var.instance_type))
@@ -48,10 +48,22 @@ variable "admin_password" {
   }
 }
 
+variable "route53_zone_name" {
+  description = "Public Route53 hosted zone name used when domain_name is set and route53_zone_id is empty (for example, example.com)."
+  type        = string
+  default     = ""
+}
+
 variable "allowed_cidrs" {
   description = "CIDR blocks allowed to reach SSH, HTTP, and HTTPS. Restrict to your office/VPN for production."
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = []
+}
+
+variable "egress_cidrs" {
+  description = "CIDR blocks the instance may reach for package, image, certificate, and model downloads. Restrict this through an egress proxy when available."
+  type        = list(string)
+  default     = []
 }
 
 variable "volume_size_gb" {
@@ -84,7 +96,7 @@ variable "ami_id" {
 }
 
 variable "route53_zone_id" {
-  description = "Route53 hosted zone ID for DNS record creation. If empty and domain_name is set, the zone is looked up by domain suffix."
+  description = "Route53 hosted zone ID for DNS record creation. If empty, route53_zone_name must be set."
   type        = string
   default     = ""
 }

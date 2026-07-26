@@ -4,8 +4,6 @@
 
 data "aws_caller_identity" "current" {}
 
-data "aws_region" "current" {}
-
 # Look up the default VPC so we don't create an unnecessary one.
 data "aws_vpc" "default" {
   default = true
@@ -38,7 +36,7 @@ data "aws_ami" "ubuntu" {
 # Look up the Route53 hosted zone when a domain is specified but no zone ID.
 data "aws_route53_zone" "primary" {
   count        = var.domain_name != "" && var.route53_zone_id == "" ? 1 : 0
-  name         = var.domain_name
+  name         = var.route53_zone_name
   private_zone = false
 }
 
@@ -72,6 +70,52 @@ locals {
 
   # Caddy address line — TLS if domain, plain HTTP otherwise.
   caddy_address = local.has_domain ? var.domain_name : ":80"
+
+  gpu_enabled = can(regex("^(g4dn|g5|p3|p4d)\\.", var.instance_type))
+}
+
+resource "aws_secretsmanager_secret" "admin_password" {
+  name_prefix = "${var.project_name}-${var.environment}-admin-"
+  description = "Caddy basic-auth password for the private LLM stack"
+  tags        = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "admin_password" {
+  secret_id     = aws_secretsmanager_secret.admin_password.id
+  secret_string = var.admin_password
+}
+
+resource "aws_iam_role" "instance" {
+  name_prefix = "${var.project_name}-${var.environment}-"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+    }]
+  })
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "read_admin_password" {
+  name = "read-admin-password"
+  role = aws_iam_role.instance.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action   = "secretsmanager:GetSecretValue"
+      Effect   = "Allow"
+      Resource = aws_secretsmanager_secret.admin_password.arn
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "this" {
+  name_prefix = "${var.project_name}-${var.environment}-"
+  role        = aws_iam_role.instance.name
 }
 
 # -----------------------------------------------------------------------------
@@ -122,8 +166,10 @@ resource "aws_vpc_security_group_ingress_rule" "https" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "all" {
+  for_each = toset([for cidr in var.egress_cidrs : cidr if cidr != ""])
+
   security_group_id = aws_security_group.this.id
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = each.value
   ip_protocol       = "-1"
   description       = "All outbound traffic"
 }
@@ -139,6 +185,12 @@ resource "aws_instance" "this" {
   vpc_security_group_ids      = [aws_security_group.this.id]
   associate_public_ip_address = true
   monitoring                  = var.enable_detailed_monitoring
+  iam_instance_profile        = aws_iam_instance_profile.this.name
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
 
   root_block_device {
     volume_type = "gp3"
@@ -161,13 +213,26 @@ resource "aws_instance" "this" {
   }
 
   user_data = templatefile("${path.module}/user-data.sh", {
-    model_name     = var.model_name
-    domain_name    = var.domain_name
-    admin_username = var.admin_username
-    admin_password = var.admin_password
-    caddy_address  = local.caddy_address
-    volume_size_gb = var.volume_size_gb
+    model_name_b64       = base64encode(var.model_name)
+    domain_name_b64      = base64encode(var.domain_name)
+    admin_username_b64   = base64encode(var.admin_username)
+    admin_secret_arn_b64 = base64encode(aws_secretsmanager_secret.admin_password.arn)
+    aws_region_b64       = base64encode(var.aws_region)
+    caddy_address_b64    = base64encode(local.caddy_address)
+    gpu_enabled          = local.gpu_enabled
   })
+
+  lifecycle {
+    precondition {
+      condition     = !local.gpu_enabled || var.ami_id != ""
+      error_message = "GPU instance types require ami_id to reference a GPU-ready AMI with NVIDIA drivers and container toolkit installed."
+    }
+
+    precondition {
+      condition     = var.domain_name == "" || var.route53_zone_id != "" || var.route53_zone_name != ""
+      error_message = "Set route53_zone_id or route53_zone_name when domain_name is configured."
+    }
+  }
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.environment}-instance"

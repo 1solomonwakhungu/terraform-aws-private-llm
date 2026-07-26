@@ -17,10 +17,6 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 5.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = ">= 3.5"
-    }
   }
 }
 
@@ -38,8 +34,8 @@ module "private_llm" {
   source = "../../"
 
   aws_region    = "us-east-1"
-  instance_type = "g5.2xlarge"
-  model_name    = "llama3.1:70b"
+  instance_type = "t3.medium"
+  model_name    = "llama3.1:8b"
 
   # Auto-TLS: Caddy requests a certificate for this domain and Route53
   # publishes the A record pointing at the Elastic IP.
@@ -51,9 +47,9 @@ module "private_llm" {
 
   # Restrict SSH/HTTP/HTTPS to the corporate VPN range.
   allowed_cidrs = ["203.0.113.0/24"]
+  egress_cidrs  = ["10.0.0.0/8"] # Corporate egress proxy/NAT range.
 
-  # 70B models need ample disk for the weights plus container data.
-  volume_size_gb = 300
+  volume_size_gb = 100
 
   project_name = "private-llm"
   environment  = "prod"

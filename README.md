@@ -71,7 +71,7 @@ A production-grade Terraform module that deploys a complete **private LLM infras
    aws route53 list-hosted-zones
    ```
 
-4. **GPU AMI Compatibility** — if using `g5.*` instances, ensure your AWS account has GPU instance limits.
+4. **GPU AMI Compatibility** — GPU instance types require an explicit GPU-ready `ami_id` with NVIDIA drivers and container toolkit installed.
    ```bash
    aws service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA
    ```
@@ -85,7 +85,7 @@ module "private_llm" {
   source = "github.com/1solomonwakhungu/terraform-aws-private-llm"
 
   aws_region     = "us-east-1"
-  instance_type  = "g5.xlarge"
+  instance_type  = "t3.medium"
   model_name     = "llama3.1:8b"
   admin_username = "admin"
   admin_password = "SuperSecretPass123!"
@@ -101,8 +101,8 @@ module "private_llm" {
   source = "github.com/1solomonwakhungu/terraform-aws-private-llm"
 
   aws_region      = "us-east-1"
-  instance_type   = "g5.xlarge"
-  model_name      = "llama3.1:70b"
+  instance_type   = "t3.medium"
+  model_name      = "llama3.1:8b"
   domain_name     = "llm.mycompany.com"
   route53_zone_id = "Z0123456789ABCDEF"
 
@@ -130,31 +130,31 @@ After apply completes (5-10 min for cloud-init), visit the `access_url` output.
 |-----------|-----------|
 | terraform | >= 1.5.0  |
 | aws       | >= 5.0    |
-| random    | >= 3.5    |
 
 ## Providers
 
 | Name   | Version |
 |--------|---------|
 | aws    | >= 5.0  |
-| random | >= 3.5  |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | aws_region | AWS region for all resources. | `string` | `"us-east-1"` | No |
-| instance_type | EC2 instance type. Use `g5.xlarge` for GPU acceleration or `t3.medium` for CPU-only. | `string` | `"g5.xlarge"` | No |
+| instance_type | EC2 instance type. GPU families require an explicit GPU-ready AMI. | `string` | `"t3.medium"` | No |
 | model_name | Ollama model to pull on first boot (e.g. `llama3.1:8b`, `llama3.1:70b`, `mistral:7b`). | `string` | `"llama3.1:8b"` | No |
 | domain_name | Fully-qualified domain name for Caddy auto-TLS. Leave empty to use HTTP + Elastic IP. | `string` | `""` | No |
 | admin_username | Basic-auth username for the Open WebUI reverse proxy. | `string` | `"admin"` | No |
 | admin_password | Basic-auth password for the Open WebUI reverse proxy. Must be at least 8 characters. | `string` | n/a | **Yes** |
-| allowed_cidrs | CIDR blocks allowed to reach SSH, HTTP, and HTTPS. Restrict to your office/VPN for production. | `list(string)` | `["0.0.0.0/0"]` | No |
+| allowed_cidrs | CIDR blocks allowed to reach SSH, HTTP, and HTTPS. Restrict to your office/VPN for production. | `list(string)` | `[]` | No |
+| egress_cidrs | CIDRs the instance may reach for package, image, certificate, and model downloads. | `list(string)` | `[]` | No |
 | volume_size_gb | EBS volume size (GB) for model storage and container data (minimum 20). | `number` | `100` | No |
 | project_name | Project name used for resource naming and tagging. | `string` | `"private-llm"` | No |
 | environment | Environment tag value (e.g. `dev`, `staging`, `prod`). | `string` | `"prod"` | No |
 | ami_id | AMI ID for the EC2 instance. If empty, the latest Ubuntu 22.04 LTS AMI is looked up automatically. | `string` | `""` | No |
-| route53_zone_id | Route53 hosted zone ID for DNS record creation. If empty and `domain_name` is set, the zone is looked up by domain suffix. | `string` | `""` | No |
+| route53_zone_name | Public Route53 hosted zone name used when a domain is set and no zone ID is provided. | `string` | `""` | No |
+| route53_zone_id | Route53 hosted zone ID for DNS record creation. If empty, set `route53_zone_name`. | `string` | `""` | No |
 | enable_detailed_monitoring | Enable EC2 detailed monitoring (higher cost, but useful for prod). | `bool` | `true` | No |
 | tags | Additional tags merged into all resources. | `map(string)` | `{}` | No |
 
@@ -192,10 +192,10 @@ See [`demo-script.md`](./demo-script.md) for the standalone sales call demo.
 
 | Variable              | Default          | Description                                      |
 |-----------------------|------------------|--------------------------------------------------|
-| `instance_type`       | `g5.xlarge`      | Any `t3.*`, `g4dn.*`, `g5.*`, `p3.*`, `p4d.*`   |
+| `instance_type`       | `t3.medium`      | Any `t3.*`; GPU families require a GPU-ready `ami_id` |
 | `model_name`          | `llama3.1:8b`    | Any Ollama model tag (e.g. `mistral:7b`, `codellama:13b`) |
 | `volume_size_gb`      | `100`            | Increase for larger models (70B needs ~80GB)    |
-| `allowed_cidrs`       | `["0.0.0.0/0"]`  | Lock down to office/VPN IPs in production       |
+| `allowed_cidrs`       | `[]`               | Set to office/VPN IPs in production             |
 | `domain_name`         | `""`             | Set for auto-TLS via Caddy + Route53            |
 | `enable_detailed_monitoring` | `true`   | CloudWatch 1-minute metrics                     |
 | `tags`                | `{}`             | Additional resource tags                        |
@@ -212,7 +212,7 @@ See [`demo-script.md`](./demo-script.md) for the standalone sales call demo.
 
 ## Security Considerations
 
-1. **Restrict `allowed_cidrs`** — The default `0.0.0.0/0` is for quick starts only. Always set to your office/VPN CIDR in production.
+1. **Set restrictive `allowed_cidrs`** — The default permits no ingress. Set only your office/VPN CIDRs.
 
 2. **Basic auth is enabled** — Caddy protects Open WebUI with HTTP basic auth. For stronger security, consider:
    - Adding OAuth2/OIDC via Caddy plugins
@@ -223,9 +223,7 @@ See [`demo-script.md`](./demo-script.md) for the standalone sales call demo.
 
 4. **EBS volumes are encrypted** — All EBS volumes use AWS-managed encryption (KMS). For compliance, use customer-managed CMKs.
 
-5. **No secrets in user-data** — The `admin_password` is passed via `templatefile()`. For production, consider:
-   - AWS Secrets Manager + a bootstrap script that fetches the password at runtime
-   - SSM Parameter Store with IAM role-based access
+5. **No plaintext secrets in user-data** — The password is stored in Secrets Manager and fetched at boot by a role restricted to that secret.
 
 6. **GPU instance security** — GPU instances are high-value targets. Use:
    - IAM instance profiles with minimal permissions

@@ -29,6 +29,16 @@ override_resource {
   }
 }
 
+override_resource {
+  target          = aws_secretsmanager_secret.admin_password
+  override_during = plan
+
+  values = {
+    id  = "arn:aws:secretsmanager:us-east-1:123456789012:secret:per237-admin"
+    arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:per237-admin"
+  }
+}
+
 run "plans_http_deployment" {
   command = plan
 
@@ -37,6 +47,7 @@ run "plans_http_deployment" {
     ami_id         = "ami-0123456789abcdef0"
     instance_type  = "t3.medium"
     allowed_cidrs  = ["198.51.100.0/24", "203.0.113.0/24"]
+    egress_cidrs   = ["10.0.0.0/8"]
     volume_size_gb = 200
     project_name   = "per237"
     environment    = "test"
@@ -59,6 +70,11 @@ run "plans_http_deployment" {
   assert {
     condition     = one(aws_instance.this.root_block_device).encrypted
     error_message = "The root volume must be encrypted."
+  }
+
+  assert {
+    condition     = one(aws_instance.this.metadata_options).http_tokens == "required"
+    error_message = "The instance must require IMDSv2 session tokens."
   }
 
   assert {
@@ -88,6 +104,20 @@ run "plans_http_deployment" {
   assert {
     condition     = aws_instance.this.tags["Owner"] == "platform"
     error_message = "Caller-supplied tags must be propagated."
+  }
+
+  assert {
+    condition = (
+      !strcontains(aws_instance.this.user_data, "correct-horse-battery-staple") &&
+      strcontains(aws_instance.this.user_data, "GPU_ENABLED=\"false\"") &&
+      strcontains(aws_instance.this.user_data, "secretsmanager get-secret-value")
+    )
+    error_message = "CPU bootstrap must fetch the password securely and omit GPU runtime flags."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.read_admin_password.policy).Statement[0].Resource == aws_secretsmanager_secret.admin_password.arn
+    error_message = "The instance role may read only this deployment's administrator secret."
   }
 }
 
@@ -147,5 +177,32 @@ run "rejects_small_model_volume" {
 
   expect_failures = [
     var.volume_size_gb,
+  ]
+}
+
+run "rejects_gpu_without_gpu_ami" {
+  command = plan
+
+  variables {
+    admin_password = "correct-horse-battery-staple"
+    instance_type  = "g5.xlarge"
+  }
+
+  expect_failures = [
+    aws_instance.this,
+  ]
+}
+
+run "rejects_domain_without_zone" {
+  command = plan
+
+  variables {
+    admin_password = "correct-horse-battery-staple"
+    ami_id         = "ami-0123456789abcdef0"
+    domain_name    = "llm.example.com"
+  }
+
+  expect_failures = [
+    aws_instance.this,
   ]
 }
