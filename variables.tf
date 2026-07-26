@@ -61,9 +61,14 @@ variable "allowed_cidrs" {
 }
 
 variable "egress_cidrs" {
-  description = "CIDR blocks the instance may reach for package, image, certificate, and model downloads. Restrict this through an egress proxy when available."
+  description = "Destination CIDRs the instance may reach. Bootstrap requires internet egress for apt, registries, Secrets Manager, model downloads, and ACME; override only when equivalent routed proxy or VPC endpoint access exists."
   type        = list(string)
-  default     = []
+  default     = ["0.0.0.0/0"]
+
+  validation {
+    condition     = length(var.egress_cidrs) > 0 && alltrue([for cidr in var.egress_cidrs : can(cidrnetmask(cidr))])
+    error_message = "egress_cidrs must contain at least one valid IPv4 CIDR that provides the bootstrap destinations described by this module."
+  }
 }
 
 variable "volume_size_gb" {

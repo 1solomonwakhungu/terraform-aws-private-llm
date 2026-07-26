@@ -47,7 +47,6 @@ run "plans_http_deployment" {
     ami_id         = "ami-0123456789abcdef0"
     instance_type  = "t3.medium"
     allowed_cidrs  = ["198.51.100.0/24", "203.0.113.0/24"]
-    egress_cidrs   = ["10.0.0.0/8"]
     volume_size_gb = 200
     project_name   = "per237"
     environment    = "test"
@@ -60,6 +59,14 @@ run "plans_http_deployment" {
   assert {
     condition     = aws_instance.this.ami == "ami-0123456789abcdef0"
     error_message = "The configured AMI must be passed to the instance."
+  }
+
+  assert {
+    condition = (
+      length(aws_vpc_security_group_egress_rule.bootstrap) == 1 &&
+      aws_vpc_security_group_egress_rule.bootstrap["0.0.0.0/0"].cidr_ipv4 == "0.0.0.0/0"
+    )
+    error_message = "The default deployment must provide functional internet egress for bootstrap dependencies."
   }
 
   assert {
@@ -204,5 +211,19 @@ run "rejects_domain_without_zone" {
 
   expect_failures = [
     aws_instance.this,
+  ]
+}
+
+run "rejects_empty_bootstrap_egress" {
+  command = plan
+
+  variables {
+    admin_password = "correct-horse-battery-staple"
+    ami_id         = "ami-0123456789abcdef0"
+    egress_cidrs   = []
+  }
+
+  expect_failures = [
+    var.egress_cidrs,
   ]
 }

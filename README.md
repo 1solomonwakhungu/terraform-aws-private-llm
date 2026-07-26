@@ -148,7 +148,7 @@ After apply completes (5-10 min for cloud-init), visit the `access_url` output.
 | admin_username | Basic-auth username for the Open WebUI reverse proxy. | `string` | `"admin"` | No |
 | admin_password | Basic-auth password for the Open WebUI reverse proxy. Must be at least 8 characters. | `string` | n/a | **Yes** |
 | allowed_cidrs | CIDR blocks allowed to reach SSH, HTTP, and HTTPS. Restrict to your office/VPN for production. | `list(string)` | `[]` | No |
-| egress_cidrs | CIDRs the instance may reach for package, image, certificate, and model downloads. | `list(string)` | `[]` | No |
+| egress_cidrs | Destination CIDRs for bootstrap/runtime dependencies. Direct bootstrap requires internet egress; narrow only with equivalent routed proxy/endpoints. | `list(string)` | `["0.0.0.0/0"]` | No |
 | volume_size_gb | EBS volume size (GB) for model storage and container data (minimum 20). | `number` | `100` | No |
 | project_name | Project name used for resource naming and tagging. | `string` | `"private-llm"` | No |
 | environment | Environment tag value (e.g. `dev`, `staging`, `prod`). | `string` | `"prod"` | No |
@@ -196,6 +196,7 @@ See [`demo-script.md`](./demo-script.md) for the standalone sales call demo.
 | `model_name`          | `llama3.1:8b`    | Any Ollama model tag (e.g. `mistral:7b`, `codellama:13b`) |
 | `volume_size_gb`      | `100`            | Increase for larger models (70B needs ~80GB)    |
 | `allowed_cidrs`       | `[]`               | Set to office/VPN IPs in production             |
+| `egress_cidrs`        | `["0.0.0.0/0"]`   | Required for direct bootstrap; narrow only with real routed proxy/endpoints |
 | `domain_name`         | `""`             | Set for auto-TLS via Caddy + Route53            |
 | `enable_detailed_monitoring` | `true`   | CloudWatch 1-minute metrics                     |
 | `tags`                | `{}`             | Additional resource tags                        |
@@ -231,6 +232,8 @@ See [`demo-script.md`](./demo-script.md) for the standalone sales call demo.
    - Regular security patching (the AMI is Ubuntu 22.04 LTS, auto-updates via unattended-upgrades)
 
 7. **Network isolation** — Consider deploying in a private subnet with a NAT gateway for production. This module uses the default VPC for simplicity.
+
+8. **Bootstrap egress is functional by default** — The instance needs public destination access for Ubuntu and Docker packages, AWS Secrets Manager, container registries, Ollama models, and Caddy ACME. Security-group egress therefore defaults to `0.0.0.0/0`; private RFC1918 destination CIDRs do not provide internet bootstrap by themselves. Override `egress_cidrs` only when routing and proxy/VPC endpoint configuration supplies every dependency.
 
 ## File Structure
 

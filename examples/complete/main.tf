@@ -47,7 +47,8 @@ module "private_llm" {
 
   # Restrict SSH/HTTP/HTTPS to the corporate VPN range.
   allowed_cidrs = ["203.0.113.0/24"]
-  egress_cidrs  = ["10.0.0.0/8"] # Corporate egress proxy/NAT range.
+  # Direct bootstrap uses the default internet egress. Override egress_cidrs only
+  # when a routed proxy or VPC endpoints provide every documented dependency.
 
   volume_size_gb = 100
 

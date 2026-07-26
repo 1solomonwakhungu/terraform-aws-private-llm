@@ -34,7 +34,7 @@ module "private_llm" {
   admin_password = "ChangeMeNow123!" # Use a variable or secrets manager in production
 
   allowed_cidrs = ["203.0.113.0/24"]
-  egress_cidrs  = ["10.0.0.0/8"] # Egress proxy/NAT range.
+  # Default internet egress is required for bootstrap dependencies.
 
   volume_size_gb = 100
   project_name   = "private-llm"

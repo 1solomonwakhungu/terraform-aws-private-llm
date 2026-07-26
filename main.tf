@@ -165,13 +165,16 @@ resource "aws_vpc_security_group_ingress_rule" "https" {
   description       = "HTTPS from allowed CIDR"
 }
 
-resource "aws_vpc_security_group_egress_rule" "all" {
+# Bootstrap requires several dynamic public services, so direct deployments allow
+# internet egress by default. Callers with a real routed proxy/endpoints can narrow it.
+#trivy:ignore:AVD-AWS-0104
+resource "aws_vpc_security_group_egress_rule" "bootstrap" {
   for_each = toset([for cidr in var.egress_cidrs : cidr if cidr != ""])
 
   security_group_id = aws_security_group.this.id
   cidr_ipv4         = each.value
   ip_protocol       = "-1"
-  description       = "All outbound traffic"
+  description       = "Bootstrap and runtime dependency access"
 }
 
 # -----------------------------------------------------------------------------
