@@ -6,12 +6,21 @@
 set -euo pipefail
 
 # --- Variables (populated by Terraform templatefile) ---
-MODEL_NAME="${model_name}"
-DOMAIN_NAME="${domain_name}"
-ADMIN_USERNAME="${admin_username}"
-ADMIN_PASSWORD="${admin_password}"
-CADDY_ADDRESS="${caddy_address}"
-VOLUME_SIZE_GB="${volume_size_gb}"
+# Terraform replaces these literal placeholders before the script reaches the host.
+# shellcheck disable=SC2016
+MODEL_NAME="$(printf '%s' '${model_name_b64}' | base64 -d)"
+# shellcheck disable=SC2016
+DOMAIN_NAME="$(printf '%s' '${domain_name_b64}' | base64 -d)"
+# shellcheck disable=SC2016
+ADMIN_USERNAME="$(printf '%s' '${admin_username_b64}' | base64 -d)"
+# shellcheck disable=SC2016
+ADMIN_SECRET_ARN="$(printf '%s' '${admin_secret_arn_b64}' | base64 -d)"
+# shellcheck disable=SC2016
+AWS_REGION="$(printf '%s' '${aws_region_b64}' | base64 -d)"
+# shellcheck disable=SC2016
+CADDY_ADDRESS="$(printf '%s' '${caddy_address_b64}' | base64 -d)"
+# shellcheck disable=SC2154
+GPU_ENABLED="${gpu_enabled}"
 
 # --- Logging ---
 exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
@@ -46,7 +55,7 @@ fi
 # -----------------------------------------------------------------------------
 echo "--- Installing Docker ---"
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg lsb-release software-properties-common
+apt-get install -y awscli ca-certificates curl gnupg lsb-release software-properties-common
 
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -70,10 +79,18 @@ docker network create llm-net 2>/dev/null || true
 # 4. Run Ollama container
 # -----------------------------------------------------------------------------
 echo "--- Starting Ollama container ---"
+GPU_ARGS=()
+if [ "$GPU_ENABLED" = "true" ]; then
+  command -v nvidia-smi >/dev/null
+  docker info 2>/dev/null | grep -q nvidia
+  # The escaped expansion is resolved after Terraform renders this template.
+  # shellcheck disable=SC2034
+  GPU_ARGS=(--gpus all)
+fi
 docker run -d \
   --name ollama \
   --restart unless-stopped \
-  --gpus all \
+  "$${GPU_ARGS[@]}" \
   --network llm-net \
   -v /mnt/models/ollama:/root/.ollama \
   -p 127.0.0.1:11434:11434 \
@@ -123,21 +140,19 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/
 apt-get update -y
 apt-get install -y caddy
 
-# Generate htpasswd for basic auth
+# Generate a Caddy-compatible password hash from the secret fetched at boot.
 echo "--- Configuring basic auth ---"
-apt-get install -y apache2-utils
-HTPASSWD_FILE="/etc/caddy/.htpasswd"
-htpasswd -bc "$HTPASSWD_FILE" "$ADMIN_USERNAME" "$ADMIN_PASSWORD"
-chmod 640 "$HTPASSWD_FILE"
-chown caddy:caddy "$HTPASSWD_FILE"
+ADMIN_PASSWORD="$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$ADMIN_SECRET_ARN" --query SecretString --output text)"
+PASSWORD_HASH="$(printf '%s' "$ADMIN_PASSWORD" | caddy hash-password --algorithm bcrypt --stdin)"
+unset ADMIN_PASSWORD
 
 # Configure Caddy
 echo "--- Writing Caddyfile ---"
 if [ -n "$DOMAIN_NAME" ]; then
   cat > /etc/caddy/Caddyfile <<CADDYEOF
 $CADDY_ADDRESS {
-    basicauth {
-        import /etc/caddy/.htpasswd
+    basic_auth {
+        $ADMIN_USERNAME $PASSWORD_HASH
     }
     reverse_proxy 127.0.0.1:3000
 }
@@ -145,8 +160,8 @@ CADDYEOF
 else
   cat > /etc/caddy/Caddyfile <<CADDYEOF
 :80 {
-    basicauth {
-        import /etc/caddy/.htpasswd
+    basic_auth {
+        $ADMIN_USERNAME $PASSWORD_HASH
     }
     reverse_proxy 127.0.0.1:3000
 }
@@ -154,6 +169,7 @@ CADDYEOF
 fi
 
 # Restart Caddy with new config
+caddy validate --config /etc/caddy/Caddyfile
 systemctl enable caddy
 systemctl restart caddy
 

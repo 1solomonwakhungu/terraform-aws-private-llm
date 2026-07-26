@@ -9,9 +9,9 @@ variable "aws_region" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type. Use g5.xlarge for GPU acceleration or t3.medium for CPU-only."
+  description = "EC2 instance type. GPU families require an explicit GPU-ready ami_id."
   type        = string
-  default     = "g5.xlarge"
+  default     = "t3.medium"
 
   validation {
     condition     = can(regex("^(t3\\.|g4dn\\.|g5\\.|p3\\.|p4d\\.)", var.instance_type))
@@ -48,10 +48,27 @@ variable "admin_password" {
   }
 }
 
+variable "route53_zone_name" {
+  description = "Public Route53 hosted zone name used when domain_name is set and route53_zone_id is empty (for example, example.com)."
+  type        = string
+  default     = ""
+}
+
 variable "allowed_cidrs" {
   description = "CIDR blocks allowed to reach SSH, HTTP, and HTTPS. Restrict to your office/VPN for production."
   type        = list(string)
+  default     = []
+}
+
+variable "egress_cidrs" {
+  description = "Destination CIDRs the instance may reach. Bootstrap requires internet egress for apt, registries, Secrets Manager, model downloads, and ACME; override only when equivalent routed proxy or VPC endpoint access exists."
+  type        = list(string)
   default     = ["0.0.0.0/0"]
+
+  validation {
+    condition     = length(var.egress_cidrs) > 0 && alltrue([for cidr in var.egress_cidrs : can(cidrnetmask(cidr))])
+    error_message = "egress_cidrs must contain at least one valid IPv4 CIDR that provides the bootstrap destinations described by this module."
+  }
 }
 
 variable "volume_size_gb" {
@@ -84,7 +101,7 @@ variable "ami_id" {
 }
 
 variable "route53_zone_id" {
-  description = "Route53 hosted zone ID for DNS record creation. If empty and domain_name is set, the zone is looked up by domain suffix."
+  description = "Route53 hosted zone ID for DNS record creation. If empty, route53_zone_name must be set."
   type        = string
   default     = ""
 }
