@@ -23,7 +23,7 @@ module "private_llm" {
   source = "../.."
 
   aws_region    = "us-east-1"
-  instance_type = "g5.xlarge"
+  instance_type = "t3.medium"
   model_name    = "llama3.1:8b"
 
   # Optional: set a domain for auto-TLS via Route53 + Caddy
@@ -33,7 +33,8 @@ module "private_llm" {
   admin_username = "admin"
   admin_password = "ChangeMeNow123!" # Use a variable or secrets manager in production
 
-  allowed_cidrs = ["0.0.0.0/0"] # Restrict to your IP in production!
+  allowed_cidrs = ["203.0.113.0/24"]
+  # Default internet egress is required for bootstrap dependencies.
 
   volume_size_gb = 100
   project_name   = "private-llm"
